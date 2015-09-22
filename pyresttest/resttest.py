@@ -12,13 +12,7 @@ from optparse import OptionParser
 from email import message_from_string  # For headers handling
 import time
 
-try:
-    from cStringIO import StringIO
-except:
-    try:
-        from StringIO import StringIO
-    except ImportError:
-        from io import StringIO
+import requests
 
 # Pyresttest internals
 from binding import Context
@@ -48,7 +42,8 @@ LOGGING_LEVELS = {'debug': logging.DEBUG,
 logging.basicConfig(format='%(levelname)s:%(message)s')
 logger = logging.getLogger('pyresttest')
 
-class cd:
+
+class cd(object):
     """Context manager for changing the current working directory"""
     # http://stackoverflow.com/questions/431684/how-do-i-cd-in-python/13197763#13197763
 
@@ -64,7 +59,8 @@ class cd:
         if self.newPath:  # Don't CD to nothingness
             os.chdir(self.savedPath)
 
-class TestConfig:
+
+class TestConfig(object):
     """ Configuration for a test run """
     timeout = DEFAULT_TIMEOUT  # timeout of tests, in seconds
     print_bodies = False  # Print response bodies in all cases
@@ -82,7 +78,8 @@ class TestConfig:
     def __str__(self):
         return json.dumps(self, default=safe_to_json)
 
-class TestSet:
+
+class TestSet(object):
     """ Encapsulates a set of tests and test configuration for them """
     tests = list()
     benchmarks = list()
@@ -96,14 +93,20 @@ class TestSet:
     def __str__(self):
         return json.dumps(self, default=safe_to_json)
 
-class BenchmarkResult:
+
+class BenchmarkResult(object):
     """ Stores results from a benchmark for reporting use """
     group = None
     name = u'unnamed'
 
-    results = dict()  # Benchmark output, map the metric to the result array for that metric
-    aggregates = list()  # List of aggregates, as tuples of (metricname, aggregate, result)
-    failures = 0  # Track call count that failed
+    # Benchmark output, map the metric to the result array for that metric
+    results = dict()
+
+    # List of aggregates, as tuples of (metricname, aggregate, result)
+    aggregates = list()
+
+    # Track call count that failed
+    failures = 0
 
     def __init__(self):
         self.aggregates = list()
@@ -112,7 +115,8 @@ class BenchmarkResult:
     def __str__(self):
         return json.dumps(self, default=safe_to_json)
 
-class TestResponse:
+
+class TestResponse(object):
     """ Encapsulates everything about a test response """
     test = None  # Test run
     response_code = None
@@ -139,6 +143,7 @@ def read_test_file(path):
     teststruct = yaml.safe_load(os.path.expandvars(read_file(path)))
     return teststruct
 
+
 def parse_headers(header_string):
     """ Parse a header-string into individual headers
         Implementation based on: http://stackoverflow.com/a/5955949/95122
@@ -152,20 +157,30 @@ def parse_headers(header_string):
     else:
         header_msg = message_from_string(headers)
         # Note: HTTP headers are *case-insensitive* per RFC 2616
-        return dict((k.lower(), v) for k,v in header_msg.items())
+        return dict((k.lower(), v) for k, v in header_msg.items())
 
-def parse_testsets(base_url, test_structure, test_files = set(), working_directory = None, vars=None):
-    """ Convert a Python data structure read from validated YAML to a set of structured testsets
-    The data structure is assumed to be a list of dictionaries, each of which describes:
+
+def parse_testsets(
+        base_url, test_structure, test_files=set(),
+        working_directory=None, vars=None):
+    """
+    Convert a Python data structure read from validated YAML to a set of
+    structured testsets.
+    The data structure is assumed to be a list of dictionaries, each of which
+    describes:
         - a tests (test structure)
         - a simple test (just a URL, and a minimal test is created)
         - or overall test configuration for this testset
-        - an import (load another set of tests into this one, from a separate file)
-            - For imports, these are recursive, and will use the parent config if none is present
+        - an import (load another set of tests into this one,
+          from a separate file)
+            - For imports, these are recursive, and will use the parent config
+              if none is present
 
-    Note: test_files is used to track tests that import other tests, to avoid recursive loops
+    Note: test_files is used to track tests that import other tests,
+    to avoid recursive loops
 
-    This returns a list of testsets, corresponding to imported testsets and in-line multi-document sets
+    This returns a list of testsets, corresponding to imported testsets
+    and in-line multi-document sets
     """
 
     tests_out = list()
@@ -176,12 +191,12 @@ def parse_testsets(base_url, test_structure, test_files = set(), working_directo
     if working_directory is None:
         working_directory = os.path.abspath(os.getcwd())
 
-    if vars and isinstance(vars,dict):
+    if vars and isinstance(vars, dict):
         test_config.variable_binds = vars
 
     # returns a testconfig and collection of tests
     for node in test_structure:  # Iterate through lists of test and configuration elements
-        if isinstance(node,dict):  # Each config element is a miniature key-value dictionary
+        if isinstance(node, dict):  # Each config element is a miniature key-value dictionary
             node = lowercase_keys(node)
             for key in node:
                 if key == u'import':
@@ -216,6 +231,7 @@ def parse_testsets(base_url, test_structure, test_files = set(), working_directo
     testsets.append(testset)
     return testsets
 
+
 def parse_configuration(node, base_config=None):
     """ Parse input config to configuration information """
     test_config = base_config
@@ -245,6 +261,7 @@ def parse_configuration(node, base_config=None):
 
     return test_config
 
+
 def read_file(path):
     """ Read an input into a file, doing necessary conversions around relative path handling """
     with open(path, "r") as f:
@@ -252,8 +269,11 @@ def read_file(path):
         f.close()
     return string
 
-def run_test(mytest, test_config = TestConfig(), context = None):
-    """ Put together test pieces: configure & run actual test, return results """
+
+def run_test(mytest, test_config=TestConfig(), context=None):
+    """
+    Put together test pieces: configure & run actual test, return results
+    """
 
     # Initialize a context if not supplied
     my_context = context
@@ -262,20 +282,15 @@ def run_test(mytest, test_config = TestConfig(), context = None):
 
     mytest.update_context_before(my_context)
     templated_test = mytest.realize(my_context)
-    curl = templated_test.configure_curl(timeout=test_config.timeout, context=my_context)
+    request = templated_test.configure_curl(context=my_context)
     result = TestResponse()
     result.test = templated_test
 
-    # reset the body, it holds values from previous runs otherwise
-    headers = StringIO()
-    body = StringIO()
-    curl.setopt(pycurl.WRITEDATA, body)
-    curl.setopt(pycurl.HEADERFUNCTION, headers.write)
-    if test_config.verbose:
-        curl.setopt(pycurl.VERBOSE,True)
+    # if test_config.verbose:
+        # request.setopt(pycurl.VERBOSE, True)
+        # TODO: log
     if test_config.ssl_insecure:
-        curl.setopt(pycurl.SSL_VERIFYPEER,0)
-        curl.setopt(pycurl.SSL_VERIFYHOST,0)
+        request.verify = False
 
     result.passed = None
 
@@ -296,42 +311,40 @@ def run_test(mytest, test_config = TestConfig(), context = None):
         time.sleep(mytest.delay)
 
     try:
-        curl.perform()  # Run the actual call
+        prepared_request = request.prepare()  # Run the actual call
+        s = requests.Session()
+        response = s.send(prepared_request, timeout=test_config.timeout)
     except Exception as e:
-        # Curl exception occurred (network error), do not pass go, do not collect $200
+        # request exception occurred (network error), do not pass go,
+        # do not collect $200
         trace = traceback.format_exc()
-        result.failures.append(Failure(message="Curl Exception: {0}".format(e), details=trace, failure_type=validators.FAILURE_CURL_EXCEPTION))
+        result.failures.append(Failure(message="request Exception: {0}".format(e), details=trace, failure_type=validators.FAILURE_CURL_EXCEPTION))
         result.passed = False
-        curl.close()
         return result
 
     # Retrieve values
-    result.body = body.getvalue()
-    body.close()
-    result.response_headers = headers.getvalue()
-    headers.close()
+    result.body = response.text
+    result.response_headers = response.headers
 
-    response_code = curl.getinfo(pycurl.RESPONSE_CODE)
-    result.response_code = response_code
+    status_code = response.status_code
+    result.response_code = status_code
 
-    logger.debug("Initial Test Result, based on expected response code: "+str(response_code in mytest.expected_status))
+    logger.debug(
+        "Initial Test Result, based on expected response code: "
+        + str(status_code in mytest.expected_status))
 
-    if response_code in mytest.expected_status:
+    if status_code in mytest.expected_status:
         result.passed = True
     else:
         # Invalid response code
         result.passed = False
-        failure_message = "Invalid HTTP response code: response code {0} not in expected codes [{1}]".format(response_code, mytest.expected_status)
-        result.failures.append(Failure(message=failure_message, details=None, failure_type=validators.FAILURE_INVALID_RESPONSE))
+        failure_message = (
+            "Invalid HTTP response code: response code {0} not in expected"
+            " codes [{1}]".format(status_code, mytest.expected_status))
+        result.failures.append(Failure(
+            message=failure_message, details=None,
+            failure_type=validators.FAILURE_INVALID_RESPONSE))
 
-    # Parse HTTP headers
-    try:
-        result.response_headers = parse_headers(result.response_headers)
-    except Exception as e:
-        trace = traceback.format_exc()
-        result.failures.append(Failure(message="Header parsing exception: {0}".format(e), details=trace, failure_type=validators.FAILURE_TEST_EXCEPTION))
-        result.passed = False
-        curl.close()
         return result
 
     # print str(test_config.print_bodies) + ',' + str(not result.passed) + ' , ' + str(test_config.print_bodies or not result.passed)
@@ -372,7 +385,6 @@ def run_test(mytest, test_config = TestConfig(), context = None):
     # TODO add string escape on body output
     logger.debug(result)
 
-    curl.close()
     return result
 
 def run_benchmark(benchmark, test_config = TestConfig(), context = None):
@@ -391,8 +403,6 @@ def run_benchmark(benchmark, test_config = TestConfig(), context = None):
 
     if (benchmark_runs <= 0):
         raise Exception("Invalid number of benchmark runs, must be > 0 :" + benchmark_runs)
-
-    result = TestResponse()
 
     # TODO create and use a curl-returning configuration function
     # TODO create and use a post-benchmark cleanup function
@@ -416,9 +426,8 @@ def run_benchmark(benchmark, test_config = TestConfig(), context = None):
     for x in xrange(0, warmup_runs):
         benchmark.update_context_before(my_context)
         templated = benchmark.realize(my_context)
-        curl = templated.configure_curl(timeout=test_config.timeout, context=my_context, curl_handle=curl)
-        curl.setopt(pycurl.WRITEFUNCTION, lambda x: None)  # Do not store actual response body at all.
-        curl.perform()
+        curl = templated.configure_curl(context=my_context, curl_handle=curl)
+        curl.send()
 
     logger.info('Warmup: ' + message + ' finished')
 
@@ -540,6 +549,7 @@ def log_failure(failure, context=None, test_config=TestConfig()):
     if failure.details:
         logger.error("Validator/Error details:"+str(failure.details))
 
+
 def run_testsets(testsets):
     """ Execute a set of tests, using given TestSet list input """
     group_results = dict()  # results, by group
@@ -574,7 +584,7 @@ def run_testsets(testsets):
                 group_results[test.group] = list()
                 group_failure_counts[test.group] = 0
 
-            result = run_test(test, test_config = myconfig, context=context)
+            result = run_test(test, test_config=myconfig, context=context)
             result.body = None  # Remove the body, save some memory!
 
             if not result.passed: # Print failure, increase failure counts for that test group
@@ -615,7 +625,7 @@ def run_testsets(testsets):
             if benchmark.output_file:  # Write file
                 logger.debug('Writing benchmark to file in format: '+benchmark.output_format)
                 write_method = OUTPUT_METHODS[benchmark.output_format]
-                my_file =  open(benchmark.output_file, 'w')  # Overwrites file
+                my_file = open(benchmark.output_file, 'w')  # Overwrites file
                 logger.debug("Benchmark writing to file: " + benchmark.output_file)
                 write_method(my_file, benchmark_result, benchmark, test_config = myconfig)
                 my_file.close()
@@ -635,6 +645,7 @@ def run_testsets(testsets):
             print(u'Test Group '+group+u' SUCCEEDED: '+ str((test_count-failures))+'/'+str(test_count) + u' Tests Passed!')
 
     return total_failures
+
 
 def register_extensions(modules):
     """ Import the modules and register their respective extensions """
@@ -674,6 +685,7 @@ try:
     register_extensions('ext.validator_jsonschema')
 except ImportError as ie:
     logging.debug("Failed to load jsonschema validator, make sure the jsonschema module is installed if you wish to use schema validators.")
+
 
 def main(args):
     """
